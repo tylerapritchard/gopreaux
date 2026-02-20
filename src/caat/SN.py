@@ -87,6 +87,15 @@ class SN:
                                     found = True
 
             if not found:
+                # Type may have changed, check caat file for type
+                caat = CAAT().caat
+                row = caat[caat["Name"] == self.name]
+                if len(row) > 0:
+                    self.classification = row["Type"].values[0]
+                    self.subtype = row["Subtype"].values[0]
+                    found = True
+
+            if not found:
                 raise Exception(f"No SN named {name} found in our archives")
 
             self.read_info_from_caat_file()
