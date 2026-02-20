@@ -87,7 +87,22 @@ WLE = {
 }
 
 
-def query_svo_service(instrument, filter):
+def query_svo_service(instrument: str, filter: str):
+    """
+    Query the SVO Filter Service to retrieve filter curves
+    for a given instrument and filter.
+
+    NOTE: Many of these are approximations for the true data in
+    our sample. 
+
+    Args:
+        instrument (str): The name of the instrument that took the data.
+        filter (str): The name of the filter of the data.
+
+    Returns:
+        astropy.Table: An astropy Table object containing the
+            filter curve information.
+    """
     base_url = "http://svo2.cab.inta-csic.es/theory/fps/fps.php?"
     if instrument.lower() == "swift":
         url = base_url + f"ID={instrument}/UVOT.{filter}"
@@ -113,15 +128,24 @@ def query_svo_service(instrument, filter):
     return table["Wavelength"], table["Transmission"]
 
 
-def bin_spec(wl, flux, wl2, plot=False):
+def bin_spec(
+    wl: np.ndarray,
+    flux: np.ndarray,
+    wl2: list | np.ndarray,
+    plot: bool = False
+):
     """
     Bin a spectrum to a certain resolution
-    Parameters
-    --------------
-    wl: wavelength array
-    flux: flux array
-    wl2: wavelength array to bin to
-    plt: plot the binned and unbinned arrays to compare
+    
+    Args:
+        wl (np.ndarray): The input wavelength array
+        flux (np.ndarray): The input flux array
+        wl2 (list | np.ndarray): The wavelength array to bin to
+        plt (bool, optional): Plot the binned and unbinned arrays to compare.
+            Defaults to False.
+
+    Returns:
+        tuple(np.ndarray): The binned wavelength and flux arrays.
     """
 
     binned_wl = []
@@ -140,8 +164,20 @@ def bin_spec(wl, flux, wl2, plot=False):
     return np.asarray(binned_wl), np.asarray(binned_flux)
 
 
-def convert_shifted_fluxes_to_shifted_mags(fluxes, sn, zp_at_wl):
-    """Convert between log flux relative to peak to mags relative to peak"""
+def convert_shifted_fluxes_to_shifted_mags(
+    fluxes: np.ndarray,
+    sn,
+    zp_at_wl: float
+):
+    """
+    Convert between log flux relative to peak to mags relative to peak.
+
+    Args:
+        fluxes (np.ndarray): An array of shifted (relative to peak)
+            flux measurements.
+        sn (SN): The SN object the fluxes belong to.
+        zp_at_wl (float): The zeropoint of the filter at the given effective wavelength.
+    """
     shifted_peak_mag = np.log10(
         sn.zps[sn.info["peak_filt"]] * 1e-11 * 10 ** (-0.4 * sn.info["peak_mag"])
     )

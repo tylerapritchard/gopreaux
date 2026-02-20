@@ -15,7 +15,11 @@ warnings.filterwarnings("ignore")
 class Plot:
     """
     Plot class allowing any number of diagnostic / step-by-step plots to be created and displayed
-    across the SN, SNCollection, GP, and GP3D classes
+    across the SN, SNCollection, GP, and GP3D classes.
+
+    This is a helper class called in the different classes to provide optional plotting
+    support. These methods are not intended to be called outside of the routines in
+    the other classes.
     """
 
     def create_empty_subplot(self):

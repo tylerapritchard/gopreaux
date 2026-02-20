@@ -14,14 +14,22 @@ logging.basicConfig(level=logging.INFO)
 
 
 class DataCube:
-    """ "
-    Class with routines to handle pre-processing of data
+    """
+    Class containing routines to handle pre-processing of data.
+
+    The purpose of this class is to process and store photometry
+    of a SN object in a pandas dataframe, containing shifted,
+    logarithmic, linear, magnitude, and flux values, as well as
+    metadata such as filter effective wavelengths and nondetections.
+    This enables efficient loading, sorting, and mathematical operations
+    on the data during the Gaussian Process Regression fitting routines.
+
     Runs SN methods such as `load_<>_data`, `shift_to_max`,
     and `convert_to_fluxes` to initialize data set.
     Also optionally performs iterative warping on SED at each
     epoch to better match observed photometry.
-    Constructs a Pandas dataframe with this information to be
-    saved, read, and manipulated as part of the fitting routine
+    Constructs a `pandas` dataframe with this information to be
+    saved, read, and manipulated as part of the fitting routine.
     """
 
     def __init__(
@@ -30,6 +38,21 @@ class DataCube:
         name: str | None = None,
         data: dict | None = None,
     ):
+        """
+        Initialize a DataCube object.
+
+        Store the photoemtry of a SN object in this `DataCube` instance.
+        The SN can be passed directly, by name, or with a dictionary of data.
+        If no data is found, this method attempts to load the data using the
+        SN object methods. 
+
+        Args:
+            sn (SN, optional): The SN object. Defaults to None.
+            name (str | None, optional): The name of a SN object, to load,
+                if one exists. Defaults to None.
+            data (dict | None, optional): A dictionary of data to load with
+                the SN object. Defaults to None.
+        """
         if sn:
             self.sn = sn
         else:
@@ -47,6 +70,17 @@ class DataCube:
         self.sn.convert_all_mags_to_fluxes()
 
     def construct_cube(self):
+        """
+        Construct a data cube using the stored photometry.
+
+        A data cube is a pandas dataframe which stores the
+        photometry of a SN object, in both magnitude and flux
+        space as well as both linear and log-transformed values.
+
+        This method loads all photometry from the SN data dictionaries,
+        redshifts it, shifts it relative to the light curve peak, and stores
+        all associated values. 
+        """
         if not any(
             [
                 filt
@@ -186,10 +220,11 @@ class DataCube:
         """
         Takes as input a data cube and turns it into a dictionary
         of photometry to be used in GP fitting
-        Assumes a data cube of size (n, 5)
+        Assumes a data cube of size (n, 5).
+        NOTE: This method is not currently implemented.
         """
         # TODO: Make this compatible with change to pandas df
-        pass
+        raise NotImplementedError
         # data = {}
         # for i in range(len(self.cube[0,:])):
         #     data.setdefault(self.cube[4][i], []).append(
@@ -210,6 +245,11 @@ class DataCube:
         #     self.sn.data = data
 
     def plot_cube(self):
+        """
+        Plots the photometry stored in the DataCube.
+
+        Plots in flux space by default.
+        """
         if not hasattr(self, "cube"):
             self.construct_cube()
         fig = plt.figure()
@@ -237,8 +277,34 @@ class DataCube:
         save: bool = False,
         overwrite: bool = False,
     ):
-        # TODO: Diagnostics on observed photometry versus mangled photometry
-        #      and trends across filters
+        """
+        Construct a "warped" data cube using the input photometry.
+
+        A "warped" data cube is one that has been iteratively mangled until
+        the interpolated SED at a given epoch convolved with the filter functions
+        of the filters at that epoch match the input flux values. This process
+        shifts the effective wavelengths of the filters until the convolved flux
+        (aka synthetic flux) matches the observed values, within some convergence
+        threshold. This step is necessary to ensure that the shape of the input SED
+        is true to the actual SN SED. 
+
+        Args:
+            niter (int, optional): The number of iterations to iteratively
+                warp the SED at each phase. Defaults to 100.
+            convergence_threshold (float, optional): The multiplicative factor
+                up to which the convolved flux is considered "converged" with the
+                input flux. Defaults to 1.1.
+            plot (bool, optional): Plot the SED and interpolated photometry.
+                Defaults to False.
+            verbose (bool, optional): Optionally output statistics and values
+                about the iterative mangling. This is to aid in debugging.
+                Defaults to False.
+            save (bool, optional): Save the final warped data cube to file.
+                The file path is built automatically from the SN object. 
+                Defaults to False.
+            overwrite (bool, optional): Overwrite any existing warped data cube
+                if attempted to save. Defaults to False.
+        """
 
         if convergence_threshold <= 1.0:
             logger.error("Convergence threshold must be greater than 1")

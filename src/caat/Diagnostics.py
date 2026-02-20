@@ -13,7 +13,12 @@ class Diagnostic:
     """
     Class to implement a number of diagnostics
     to check quality of the GP fitting, including
-    but not limited to plots and metrics
+    but not limited to plots and metrics.
+
+    This is a helper class to provide validation and support
+    during the Gaussian Process Regression fitting process.
+    These methods are not intended to be called outside the routines
+    in the GP3D class.
     """
 
     def identify_outlier_points(

@@ -23,10 +23,8 @@ logging.basicConfig(level=logging.INFO)
 
 class SurfaceArray:
     """
-    Class to handle a final SED surface that is a numpy array,
+    Class that stores final SED surface models as a numpy array,
     rather than a GaussianProcessRegressor object.
-    This is to accomodate the user story of median combining multiple
-    GP SEDs generated from individual objects.
 
     Contains a `predict` method that is called with the same inputs as the
     `GaussianProcessRegressor.predict` method, so that both can objects
@@ -40,6 +38,20 @@ class SurfaceArray:
         wl_grid: np.ndarray,
         kernel: RBF | Matern | WhiteKernel | None = None,
     ):
+        """
+        Initialize a `SurfaceArray` object containing a surface, phase grid,
+        wavelength grid, and kernel.
+
+        Args:
+            surface (np.ndarray): The final SED surface model,
+                represented as a numpy array.
+            phase_grid (np.ndarray): The grid of phases used to construct
+                the surface model.
+            wl_grid (np.ndarray): The grid of wavelengths used to construct
+                the surface model.
+            kernel (RBF | Matern | WhiteKernel | None, optional): The kernel
+                used to construct the surface model. Defaults to None.
+        """
         self.surface = surface[0]
         self.iqr = surface[1]
 
@@ -51,6 +63,16 @@ class SurfaceArray:
         """
         Predict a light curve or SED from the SurfaceArray.
         Analogous to the `GaussianProcessRegressor.predict` method
+
+        Args:
+            input (np.ndarray): An mxn array of phase and wavelength values
+                at which to predict relative magnitudes.
+            return_std (bool, optional): Return the uncertainty in the
+                predicted values. Defaults to False.
+
+        Returns:
+            tuple[np.ndarray | None]: The returned predicted magnitudes
+                and (optional) uncertainties.
         """
         # Interpolate over the surface
         interp = RegularGridInterpolator(
@@ -59,7 +81,7 @@ class SurfaceArray:
         result = interp(input)
 
         if not return_std:
-            return result
+            return result, None
 
         interp_std = RegularGridInterpolator(
             (self.phase_grid, self.wl_grid), self.iqr.T
@@ -90,6 +112,37 @@ class SNModel:
         norm_set: SNType | SNCollection | None = None,
         log_transform: int | float | bool = False,
     ):
+        """
+        Initialize an SNModel object from a number of arguments.
+
+        Args:
+            surface (GaussianProcessRegressor | str | SurfaceArray | None, optional): The
+                final SED surface model. Can be either an initialized and fit
+                `GaussianProcessRegressor` object, a `SurfaceArray` object, or filepath
+                to a saved model. Defaults to None.
+            template_mags (np.ndarray | None, optional): The magnitudes used to
+                normalize the input photometry prior to fitting. Defaults to None.
+            phase_grid (np.ndarray | None, optional): The phase grid used to
+                produce the final SED surface model. Defaults to None.
+            phase_bounds (tuple | None, optional): The minimum and maximum
+                phase values provided to the fitting. Defaults to None.
+            wl_grid (np.ndarray | None, optional): The wavelength grid used to
+                produce the final SED surface model. Defaults to None.
+            filters_fit (list[str] | None, optional): The specified filters of the photometry
+                used in the fitting. Defaults to None.
+            sn (SN | None, optional): The SN object to which this model belongs.
+                Defaults to None.
+            sncollection (SNType | SNCollection | None, optional): The collection of SN
+                objects to which this model belongs. Defaults to None.
+            norm_set (SNType | SNCollection | None, optional): The set of SN objects
+                used in the normalization process during the fitting. Defaults to None.
+            log_transform (int | float | bool, optional): The value of `log_transform` used
+                in the fitting, if one was used. Defaults to False.
+
+        Raises:
+            ValueError: Must initialize an SNModel object by passing in either
+                an SN or SNCollection, to which this model belongs.
+        """
         self.base_path = os.path.join(ROOT_DIR, "data/final_models/")
 
         if type(surface) == str:
@@ -147,6 +200,19 @@ class SNModel:
             self.log_transform = log_transform
 
     def save_fits(self, filename: str = None, force: bool = False):
+        """
+        Save the SNModel as a .fits file. The .fits file will store
+        the pickled SED surface model, the associated uncertainties,
+        and all metadata passed in through the initialization. This
+        format allows it to be easily loaded and used without redoing
+        the fitting process.
+
+        Args:
+            filename (str, optional): The name of the file to
+                be saved. Defaults to None.
+            force (bool, optional): Overwrite an existing file, if one
+                already exists with the same `filename`. Defaults to False.
+        """
         if not self.surface:
             logger.warning(
                 "Need to instantiate the SNModel class with a GP model to save it!"
@@ -201,6 +267,18 @@ class SNModel:
         hdul.close()
 
     def load_from_fits(self, filename: str):
+        """
+        Load a specified .fits file as an `SNModel` object.
+        This is used during the initialization of the object,
+        if a string is passed as the `surface` argument.
+        Loading the saved .fits file will initialize the
+        underlying SED surface model and load all
+        associated metadata.
+
+        Args:
+            filename (str): The path to and name of the .fits file.
+
+        """
         with fits.open(os.path.join(self.base_path, filename)) as hdul:
             surface = pickle.loads(hdul[0].data)
             log_transform = hdul[0].header["LOG_TRANSFORM"]
@@ -234,8 +312,36 @@ class SNModel:
 
         self.norm_set = SNCollection(names=norm_set_names.split(","))
 
-    def predict_lightcurve(self, phase_min, phase_max, wavelength, show=True):
-        # Predict a light curve
+    def predict_lightcurve(
+        self,
+        phase_min: float | int,
+        phase_max: float | int,
+        wavelength: float | int,
+        show=True,
+    ):
+        """
+        Predict a light curve using the stored surface model.
+        Utilizes the `predict()` method on `self.surface` to predict
+        relative magnitudes given phase bounds and wavelength.
+        Works for both stored and initialized `GaussianProcessRegressor`
+        objects as well as `SurfaceArray` objects.
+
+        Args:
+            phase_min (float | int): The minimum phase to predict,
+                i.e. the first point of the light curve.
+            phase_max (float | int): The maximum phase to predict,
+                i.e. the last point of the light curve.
+            wavelength (float | int): The wavelength at which to
+                predict the light curve.
+            show (bool, optional): Plot the predicted light curve.
+                Defaults to True.
+
+        Raises:
+            ValueError: If the input phase_min or phase_max are
+                outside the fitted bounds of the Gaussian process.
+            ValueError: If the input wavelength is outside the
+                fitted bounds of the Gaussian Process.
+        """
         if phase_max > self.max_phase or phase_min < self.min_phase:
             raise ValueError("Phases need to be within the bounds of the GP")
         if wavelength < self.min_wl or wavelength > self.max_wl:
@@ -285,7 +391,29 @@ class SNModel:
             plt.show()
 
     def predict_sed(self, wavelength_min, wavelength_max, phase, show=True):
-        # Predict an SED
+        """
+        Predict a spectral energy distribution (SED) using the stored surface model.
+        Utilizes the `predict()` method on `self.surface` to predict
+        relative magnitudes given wavelength bounds and phase.
+        Works for both stored and initialized `GaussianProcessRegressor`
+        objects as well as `SurfaceArray` objects.
+
+        Args:
+            wavelength_min (float | int): The minimum wavelength to predict,
+                i.e. the first point of the SED.
+            phase_max (float | int): The maximum wavelength to predict,
+                i.e. the last point of the SED.
+            phase (float | int): The phase at which to
+                predict the SED.
+            show (bool, optional): Plot the predicted light curve.
+                Defaults to True.
+
+        Raises:
+            ValueError: If the input wavelength_min or wavelength_max are
+                outside the fitted bounds of the Gaussian process.
+            ValueError: If the input phase is outside the
+                fitted bounds of the Gaussian Process.
+        """
         if wavelength_max > self.max_wl or wavelength_min < self.min_wl:
             raise ValueError("Wavelengths need to be within the bounds of the GP")
         if phase < self.min_phase or phase > self.max_phase:
@@ -332,7 +460,35 @@ class SNModel:
         self, wavelengths: np.ndarray, phases: np.ndarray, show: bool = True, **kwargs
     ):
         """
-        Predict a series of photometry points given arrays of wavelength and phase
+        Predict a series of photometry points given arrays of wavelength and phase.
+        Utilizes the `predict()` method on `self.surface` to predict
+        relative magnitudes at discrete points of wavelength and phase.
+        Works for both stored and initialized `GaussianProcessRegressor`
+        objects as well as `SurfaceArray` objects.
+
+        Example:
+            To predict points in two filters at each of three phases,
+            `wavelengths` and `phases` must be length 6 arrays, e.g.
+            `wavelengths = [3500, 3500, 3500, 5000, 5000, 5000]`
+            `phases = [-10, 0, 10, -10, 0, 10]`
+
+
+        Args:
+            wavelengths (np.ndarray): array of wavelengths,
+                in Angstroms.
+            phases (np.ndarray): array of phases, in days.
+            show (bool, optional): Plot the predicted
+                photometry points. Defaults to True.
+
+        Raises:
+            ValueError: If any input wavelength values are outside
+                the bounds of the Gaussian process fit.
+            ValueError: If any input phase values are outside
+                the bounds of the Gaussian process fit.
+
+        Returns:
+            tuple[np.ndarray, np.ndarray, np.ndarray]: The predicted phases,
+                magnitudes, and uncertainties of the photometry points.
         """
         if any(wavelengths > max(self.wl_grid)) or any(wavelengths < min(self.wl_grid)):
             raise ValueError("Wavelengths need to be within the bounds of the GP")
@@ -380,6 +536,16 @@ class SNModel:
         return phases, prediction + template_lc, dev
 
     def compare_lightcurve_with_photometry(self, sn: SN, filt: str, show: bool = True):
+        """
+        Compare a predicted light curve with observed photometry.
+        Useful when validating the accuracy of a model's predicted light curve.
+
+        Args:
+            sn (SN): A SN object with observed photometry.
+            filt (str): The filter of the light curve to compare.
+            show (bool, optional): Plot the resulting comparison.
+                Defaults to True.
+        """
         datacube = DataCube(sn=sn)
         datacube.construct_cube()
         cube = datacube.cube
@@ -419,20 +585,18 @@ class SNModel:
         Fit input photometry using the GaussianProcessRegressor model.
         If a phase min or phase max is specified, extrapolates the fit to those bounds.
 
-        Parameters:
-            photometry: dict | pd.DataFrame
-                The input photometry to fit. Must be a dict or DataFrame that contains
+        Args:
+            photometry (dict | pd.DataFrame): The input photometry
+                to fit. Must be a dict or DataFrame that contains
                 these columns: Filter, Phase, Mag, and MagErr
-            phase_min: float | None
-                The minimum phase to constrain our GP prediction
-            phase_max: float | None
-                The maximum phase to constrain our GP prediction
-            show: bool
-                Flag to show the output plot
-            nsamples: int
-                Number of samples to draw from the GP for the fit
-                If 1, plots the usual GP prediction with error bars
-                If >1, plots nsamples of randomly drawn GP fits
+            phase_min (float, optional): The minimum phase to constrain our
+                GP prediction. Defaults to None.
+            phase_max (float, optional): The maximum phase to constrain
+                our GP prediction. Defaults to None.
+            show (bool, optional): Plot the resulting fit. Defaults to False.
+            nsamples (int, optional): Number of samples to draw from the GP
+                for the fit. If 1, plots the usual GP prediction with error bars
+                If >1, plots nsamples of randomly drawn GP fits. Defaults to 1.
         """
 
         if isinstance(photometry, dict):

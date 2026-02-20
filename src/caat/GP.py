@@ -21,7 +21,12 @@ warnings.filterwarnings("ignore")
 
 class Fitter(ABC):
     """
-    An AbstractBaseClass representing any Fitter object
+    An AbstractBaseClass representing any Fitter object.
+
+    This is inherited by the GP and GP3D classes in this package.
+    More generally, a user is free to design a custom Fitter
+    class to support their specific use case that inherits the 
+    `Fitter` ABC.
 
     Required Methods:
     -------------
@@ -54,7 +59,14 @@ class Fitter(ABC):
 
 class GP(Fitter):
     """
-    GP fit to a single band
+    Generate a GP fit for a single band.
+
+    Unlike `GP3D`, the `GP` class provides functionality to
+    perform Gaussian Process Regression on photometry from a
+    single filter. This class inherits the `Fitter` ABC and
+    prepares all data for the input sample, processes the data
+    to be used in the Gaussian process regression routine, and
+    performs the fitting.
     """
 
     wle = WLE
@@ -68,6 +80,25 @@ class GP(Fitter):
         phasemax: int,
         log_transform: float,
     ):
+        """
+        Initialize a GP object.
+
+        Provides methods to perform Gaussian Process Regression on 
+        photometry from a single filter for a collection of SN objects.
+        NOTE: This method is not used frequently within the base
+        GOPREAUX package. Instead, it is used as a building block for the
+        `GP3D` class, and to provides backwards support for more traditional
+        Gaussian Process fitting routines.
+
+        Args:
+            sne_collection (SNCollection | SNType): A collection of SN objects to fit.
+            kernel (Kernel): A Kernel object used in the Gaussian Process Regression.
+            filtlist (list): The filter of the photometry to fit.
+            phasemin (int): The minimum phase, relative to peak brightness, to be fit.
+            phasemax (int): The maximum phase, relative to peak brightness, to be fit.
+            log_transform (float): The offset in the log transform. Must be larger than `phasemin`. 
+                Effectively controls the light curve "stretch" in log space.
+        """
         self.collection = sne_collection
         self.kernel = kernel
         self.filtlist = filtlist
@@ -239,7 +270,28 @@ class GP(Fitter):
             wls.reshape(-1, 1),
         )
 
-    def run(self, filt, test_size):
+    def run(self, filt: str, test_size: float):
+        """
+        Run the Gaussian Process Regression.
+
+        This method runs the `_prepare_data` and 
+        `_process_dataset` methods to prepare the data for fitting.
+
+        A random sample of the input photometry is chosen via the 
+        `sklearn` `train_test_split` function. The GaussianProcessRegressor
+        object is returned along with the input photometry.
+
+        Args:
+            filt (str): The filter of the photometry to fit.
+            test_size (float): The fraction of the input dataset to fit
+                with the Gaussian process. Must be between 0 and 1.
+
+        Returns:
+            GaussianProcessRegressor: The trained Gaussian process fit
+            np.ndarray: The input phases in the fit
+            np.ndarray: The input magnitudes in the fit
+            np.ndarray: The uncertainties on the input magnitudes.
+        """
         self._prepare_data()
 
         phases, mags, errs, _ = self._process_dataset(filt, sn_set=self.collection)
@@ -277,7 +329,20 @@ class GP(Fitter):
 
         return gaussian_process, phases, mags, errs
 
-    def predict(self, filt, test_size, plot=False):
+    def predict(self, filt: str, test_size: float, plot=False):
+        """
+        Run the Gaussian Process Regression and use it to predict
+        a light curve for the input filter.
+
+        Calls the `run` method and uses the trained, outputted
+        `GaussianProcessRegressor` object to produce a predicted light curve.
+
+        Args:
+            filt (str): The filter of the photometry to fit.
+            test_size (float): The fraction of the input dataset to fit
+                with the Gaussian process. Must be between 0 and 1.
+            plot (bool, optional): Plot the predicted light curve. Defaults to False.
+        """
         gaussian_process, phases, mags, errs = self.run(filt, test_size)
 
         mean_prediction, std_prediction = gaussian_process.predict(

@@ -50,6 +50,24 @@ class GP3D(GP):
         set_to_normalize: SNCollection | SNType | None = None,
         mangle_sed: bool = False,
     ):
+        """
+        Initialize a GP3D object with the following arguments.
+
+        Args:
+            collection (SNCollection | SNType): A collection of SN objects to fit
+            kernel (Kernel): A Kernel object used in the Gaussian Process Regression.
+            filtlist (list): A list of filters to fit.
+            phasemin (int): The minimum phase, relative to peak brightness, to be fit.
+            phasemax (int): The maximum phase, relative to peak brightness, to be fit.
+            log_transform (float): The offset in the log transform. Must be larger than `phasemin`. 
+                Effectively controls the light curve "stretch" in log space.
+            set_to_normalize (SNCollection | SNType | None, optional): The colleciton of
+                transients to normalize `collection` to. If `None`, will use `collection`. 
+                Defaults to None.
+            mangle_sed (bool, optional): Use the calculated mangled `DataCube` for each
+                `SN` object in `collection` and `set_to_normalize`. If True, will exclude
+                `SN` objects without a mangled `DataCube`. Defaults to False.
+        """
         super().__init__(
             collection, kernel, filtlist, phasemin, phasemax, log_transform
         )
@@ -678,12 +696,29 @@ class GP3D(GP):
         subtract_polynomial=False,
     ):
         """
-        Function to run the Gaussian Process Regression on full sample together
-        ===============================================
-        Takes as input:
-        plot: Optional flag to plot fits and intermediate figures
-        subtract_median: Flag to calculate residuals by subtracting the SN magnitude/flux from a median template grid
-        subtract_polynomial: Flag to calculate residuals by subtracting the SN magnitude/flux from a polynomial template grid
+        Run the Gaussian Process Regression fitting routine on the full sample
+        at once. Does not individually fit each transient, but instead fits
+        all photometry in the input sample simultaneously.
+
+        Args:
+            plot (bool, optional): Show intermediate plots. Defaults to False.
+            subtract_median (bool, optional): Fit and subtract off a median function
+                to calculate residuals. Defaults to False.
+            subtract_polynomial (bool, optional): Fit and subtract off a polynomial
+                function to calculate residuals. One of `subtract_median` and
+                `subtract_polynomial` must be True. Defaults to False.
+
+        Raises:
+            Exception: Must toggle either subtract_median or subtract_polynomial as True
+            to run GP3D.
+
+        Returns:
+            list: A list containing the Gaussian process model and its
+                uncertainty, both as an mxn array
+            np.ndarray: An array containing the processed magnitudes from
+                the template grid
+            np.ndarray: An array containing the log-transformed phases
+            np.ndarray: An array containing the log-transformed wavelengths
         """
         template_df = self._process_dataset(set_to_normalize=self.set_to_normalize)
 
@@ -833,14 +868,25 @@ class GP3D(GP):
 
     def optimize_hyperparams(self, subtract_median=False, subtract_polynomial=False):
         """
-        Function to optimize kernel hyperparameters by fitting
-        the SNe in the collection individually
-        ===============================================
-        Takes as input:
-        subtract_median: Flag to calculate residuals by subtracting the SN magnitude/flux from a median template grid
-        subtract_polynomial: Flag to calculate residuals by subtracting the SN magnitude/flux from a polynomial template grid
+        Optimize the Gaussian Process Regression kernel hyperparameters by fitting
+        each transient in the sample individually.
+        This is normally run before the `predict` method to retrieve the optimized
+        kernel hyperparameters for the input sample. These hyperparameters are normally
+        then fixed in the kernel, and the `predict` method is run using the fixed kernel.
+
+        Args:
+            subtract_median (bool, optional):  Fit and subtract off a median function
+                to calculate residuals. Defaults to False.
+            subtract_polynomial (bool, optional): Fit and subtract off a polynomial
+                function to calculate residuals. One of `subtract_median` and
+                `subtract_polynomial` must be True. Defaults to False.
+
+        Raises:
+            Exception: Must toggle either subtract_median or subtract_polynomial as True
+            to run GP3D.
+
         Returns:
-        kernel_params: The optimized kernel hyperparameters
+            list: List of optimized kernel hyperparameters.
         """
 
         template_df = self._process_dataset(set_to_normalize=self.set_to_normalize)
@@ -1101,14 +1147,36 @@ class GP3D(GP):
         run_diagnostics=False,
     ):
         """
-        Function to run the Gaussian Process Regression on each SN individually
-        ===============================================
-        Takes as input:
-        plot: Optional flag to plot fits and intermediate figures
-        subtract_median: Flag to calculate residuals by subtracting the SN magnitude/flux from a median template grid
-        subtract_polynomial: Flag to calculate residuals by subtracting the SN magnitude/flux from a polynomial template grid
-        interactive: Flag to interactively choose to include each GP fit to the final median-combined template
-        run_diagnostics: Flag to run diagnostic tests to ensure reasonable fits
+        Run the Gaussian Process Regression fitting routine on each transient
+        in the full sample individually. This produces a bespoke Gaussian process
+        model for each transient, constructing a full 3-dimension SED surface.
+        These surfaces are then randomly sampled and to be used in the construction
+        of the final template model surface.
+
+        Args:
+            plot (bool, optional): Show intermediate plots. Defaults to False.
+            subtract_median (bool, optional): Fit and subtract off a median function
+                to calculate residuals. Defaults to False.
+            subtract_polynomial (bool, optional): Fit and subtract off a polynomial
+                function to calculate residuals. One of `subtract_median` and
+                `subtract_polynomial` must be True. Defaults to False.
+            interactive (bool, optional): Interactively choose which fits to use in the
+                creation of the final Gaussian process model. If True, sets `plot` to True
+                as well. Defaults to False.
+            run_diagnostics (bool, optional): Run diagnostic tests on the fitting to identify
+                data points or regions of poor fit quality. Defaults to False.
+
+        Raises:
+            Exception: Must toggle either subtract_median or subtract_polynomial as True
+            to run GP3D.
+
+        Returns:
+            list: A list of random samples from the Gaussian process distribution. Used to
+                construct final 3-dimensional templates.
+            np.ndarray: An array containing the processed magnitudes from
+                the template grid
+            np.ndarray: An array containing the log-transformed phases
+            np.ndarray: An array containing the log-transformed wavelengths
         """
         if interactive:
             plot = True
@@ -1469,14 +1537,27 @@ class GP3D(GP):
         fit_separately=True,
     ):
         """
-        Function to predict light curve behavior using Gaussian Process Regression
-        ===============================================
-        Takes as input:
-        plot: Optional flag to plot fits and intermediate figures
-        subtract_median: Flag to calculate residuals by subtracting the SN magnitude/flux from a median template grid
-        subtract_polynomial: Flag to calculate residuals by subtracting the SN magnitude/flux from a polynomial template grid
-        run_diagnostics: Flag to run diagnostic tests to ensure reasonable fits
-        fit_separately: Run GPR on each SN separately and return the resulting SED surfaces from each
+        Generate a Gaussian Process Regression model of the input transient sample.
+        Uses the specified normalization sample and all other initialized parameters
+        to process and fit the data to produce the model.
+
+        Args:
+            plot (bool, optional): Show intermediate plots. Defaults to False.
+            subtract_median (bool, optional): Fit and subtract off a median function
+                to calculate residuals. Defaults to False.
+            subtract_polynomial (bool, optional): Fit and subtract off a polynomial
+                function to calculate residuals. One of `subtract_median` and
+                `subtract_polynomial` must be True. Defaults to False.
+            run_diagnostics (bool, optional): Run diagnostic tests on the fitting to identify
+                data points or regions of poor fit quality. Defaults to False.
+            fit_separately (bol, optional): Fit each transient separately, or together
+                as a group. Controls whether `run_gp_individually` or `run_gp_on_full_sample`
+                is called to generate the predictive Gaussian Process Regression model.
+                Defaults to True.
+
+        Returns:
+            SNModel: An SNModel object containing the final, 3-dimensional Gaussian Process
+                Regression template model of the input transient sample.
         """
         self._prepare_data()
 

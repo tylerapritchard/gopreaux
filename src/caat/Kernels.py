@@ -8,7 +8,24 @@ warnings.filterwarnings("ignore")
 
 
 class Kernel(SklearnKernel):
+    """
+    A custom Kernel class used to store kernel hyperparameters
+    and use them in the sklearn GaussianProcessRegression class.
+    This is intended to be used to produce linear combinations of
+    the basic Sklearn kernels.
+
+    This class inherits the sklearn `Kernel` object and overwrites
+    some of its methods to maintain compatibility with the base class
+    and the `GaussianProcessRegressor` class while enabling users to
+    input custom kernels.
+    """
     def __init__(self, kernel: SklearnKernel):
+        """
+        Initialize a Kernel object with an sklearn `Kernel`.
+
+        Args:
+            kernel (SklearnKernel): The sklearn `Kernel` object.
+        """
         self.kernel = kernel
 
     def __call__(self, X, Y=None, eval_gradient=False):
@@ -21,7 +38,13 @@ class Kernel(SklearnKernel):
         return self.kernel.diag(X)
 
     def _recursively_get_component(self, kernel=None):
-        """Recursively get all components of self.kernel"""
+        """
+        Recursively get all components of self.kernel
+        
+        Args:
+            kernel (SklearnKernel | Kernel | None, optional): The 
+                sklearn `Kernel` object.
+        """
         if kernel is None:
             kernel = self.kernel
 
@@ -50,7 +73,13 @@ class Kernel(SklearnKernel):
         Gets the valid param keywords for the kernel and uses
         them to set the values of the correct parameters.
         If Kernel is a product or sum of kernels, assumes the
-        input values and bounds are in the same order as the kernels
+        input values and bounds are in the same order as the kernels.
+
+        Args:
+            values (list): The kernel parameters
+            bounds (list | str): The kernel parameter bounds
+            kernel (_type_, optional): The kernel to set parameters
+                of. Defaults to None.
         """
         if kernel is None:
             kernel = self.kernel

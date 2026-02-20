@@ -53,6 +53,22 @@ class SN:
     wle = WLE
 
     def __init__(self, name: str = None, data: dict = None):
+        """
+        Initialize a SN object. Can initialize through either a name
+        or through a dictionary of data.
+
+        Args:
+            name (str, optional): The name of the SN. 
+                If it exists in the CAAT file, the data
+                will automatically be searched for and loaded. Defaults to None.
+            data (dict, optional): A dictionary of data. Allows for loading
+                a new SN object that has not already been saved.
+                Defaults to None.
+
+        Raises:
+            Exception: If `name` is given, but is not found in the
+                CAAT archive.
+        """
         if isinstance(name, str):
             self.name = name
             self.data = {}
@@ -88,9 +104,25 @@ class SN:
             self.zps[filt] = (10**-23 * 3e18 / wl) * 1e11
 
     def __repr__(self):
+        """
+        Override the `__repr__` method to output
+        the name of the SN object.
+
+        Returns:
+            str: The name of the SN object.
+        """
         return self.name
 
     def write_info_to_caat_file(self, force=False):
+        """
+        Save light curve peak information to the CAAT file.
+        This method is usually run after the light curve peak
+        is fit manually or automatically. 
+
+        Args:
+            force (bool, optional): Overwrite the peak info,
+                if it already exists in the CAAT file. Defaults to False.
+        """
         caat = CAAT().caat
         row = caat[caat["Name"] == self.name]
 
@@ -106,6 +138,12 @@ class SN:
         )
 
     def read_info_from_caat_file(self):
+        """
+        Load information about the SN object from the CAAT file.
+        Will search by name for the SN object in the CAAT file.
+        If it is found, the redshift, coordinates, and light curve
+        peak information are loaded as a dictionary attribute.
+        """
         caat = CAAT().caat
         row = caat[caat["Name"] == self.name]
         if (
@@ -128,7 +166,15 @@ class SN:
             self.info = info_dict
 
     def load_swift_data(self):
-        ### Load the Swift data for this object
+        """
+        Load Swift data for this object.
+        Searches for the corresponding SOUSA output
+        .dat file. If one is found, reads the file
+        as a pandas dataframe, extracts detection and
+        nondetection information, and transforms the 
+        magnitudes to the Vega system. Loaded photometry is saved as a 
+        dictionary attribute to this class.
+        """
         if not os.path.exists(
             os.path.join(
                 self.base_path,
@@ -199,7 +245,12 @@ class SN:
                 )
 
     def load_json_data(self):
-        ### Load data saved as a JSON file (ZTF, ATLAS, OpenSN, ASASSN)
+        """
+        Load data saved as a JSON file. This applies to data from
+        ZTF, ATLAS, OpenSN, and ASAS-SN>. This method searches for .json
+        data files and loads the photometry from any that it finds.
+        Loaded photometry is saved as a dictionary attribute to this class.
+        """
         if not os.path.exists(
             os.path.join(self.base_path, self.classification, self.subtype, self.name)
         ):
@@ -234,6 +285,10 @@ class SN:
                     )
 
     def write_shifted_data(self):
+        """
+        Writes photometry that has been shifted relative to light curve
+        peak to a .json file. Runs after the photometry has been shifted.
+        """
         with open(
             os.path.join(
                 self.base_path,
@@ -247,8 +302,10 @@ class SN:
             json.dump(self.shifted_data, f, indent=4)
 
     def load_shifted_data(self):
-        ### Load shifted data that has been saved to a file
-
+        """
+        Loads any photometry for this SN object that has been
+        shifted relative to light curve peak and saved to file.
+        """
         if not os.path.exists(
             os.path.join(
                 self.base_path,
@@ -276,7 +333,11 @@ class SN:
             self.shifted_data = shifted_data
 
     def convert_all_mags_to_fluxes(self):
-        # for data in [self.data, self.shifted_data]:
+        """
+        Converts all photometry in magnitudes to the corresponding
+        flux values. Uses AB zeropoints. Runs on both shifted and unshifted
+        photometry, relative to light curve peak.
+        """
         for filt in list(self.data.keys()):
             new_phot = []
             if filt in self.zps.keys():
@@ -318,8 +379,8 @@ class SN:
     def correct_for_galactic_extinction(self):
         """
         Uses the coordinates of the SN from the CAAT file
-        to find and correct for MW extinction
-        NOTE: Must be run before convert_to_fluxes() is ran
+        to find and correct for MW extinction.
+        NOTE: Must be run before convert_to_fluxes() is ran.
         """
         sfd = SFDQuery()
 
@@ -381,6 +442,24 @@ class SN:
         offset=0,
         plot_fluxes=False,
     ):
+        """
+        Plot photometry for this SN object. A user may control
+        the type of photometry that is plotted (e.g., filters,
+        magnitudes or fluxes, shifted or unshifted). If no data
+        is found, this method will attempt to load data first.
+
+        Args:
+            filts_to_plot (list, optional): A list of the filters
+                to plot. Defaults to ["all"].
+            shifted_data_exists (bool, optional): Flag to control
+                whether or not to load new shifted data. Defaults to False.
+            view_shifted_data (bool, optional): Flag to control plotting
+                data shifted relative to light curve peak. Defaults to False.
+            offset (int, optional): An offset to pass to the `shift_to_max` method
+                used for fitting the light curve peak. Defaults to 0.
+            plot_fluxes (bool, optional): Flag used to control plotting
+                photometry in magnitude or flux space. Defaults to False.
+        """
         if (
             filts_to_plot[0] == "all"
         ):  # if individual filters not specified, plot all by default
@@ -418,10 +497,22 @@ class SN:
         self, filt, shift_array=[-3, -2, -1, 0, 1, 2, 3], plot=False, offset=0
     ):
         """
-        Takes as input arrays for MJD, mag, and err for a filter
-        as well as the guess for the MJD of maximum and an array
-        to shift the lightcurve over,
-        and returns estimates of the peak MJD and mag at peak
+        Fit for the light curve peak.
+        This method identifies a preliminary light curve peak, selects
+        photometry within a 30 day window of the preliminary peak, and iteratively
+        fits a third-order polynomial to a random subset of that data. This process
+        only runs if more than 4 light curve points are within the preliminary peak in
+        the given filter. Writes the peak info the `info` attribute on this class.
+
+        Args:
+            filt (_type_): The filter of the photometry to fit.
+            shift_array (list, optional): An array of phases to shift the
+                selected photometry by, during the iterative peak fitting. 
+                Defaults to [-3, -2, -1, 0, 1, 2, 3].
+            plot (bool, optional): Plot the fit to the peak. Defaults to False.
+            offset (int, optional): A number of days relative to the preliminary
+                peak to fit. Useful if the identified preliminary peak is not
+                close to the true light curve peak. Defaults to 0.
         """
         mjd_array = np.asarray(
             [
@@ -446,7 +537,7 @@ class SN:
         )
 
         if len(mag_array) < 4:  # == 0:
-            return None, None
+            return
 
         initial_guess_mjd_max = (
             mjd_array[np.where((mag_array == min(mag_array)))[0]][0] + offset
@@ -454,7 +545,7 @@ class SN:
 
         fit_inds = np.where((abs(mjd_array - initial_guess_mjd_max) < 30))[0]
         if len(fit_inds) < 4:
-            return None, None
+            return
 
         fit_coeffs = np.polyfit(mjd_array[fit_inds], mag_array[fit_inds], 3)
         guess_phases = np.arange(min(mjd_array[fit_inds]), max(mjd_array[fit_inds]), 1)
@@ -462,7 +553,7 @@ class SN:
         guess_best_fit = p(guess_phases)
 
         if len(guess_best_fit) == 0:
-            return None, None
+            return
 
         guess_mjd_max = guess_phases[
             np.where((guess_best_fit == min(guess_best_fit)))[0]
@@ -473,8 +564,7 @@ class SN:
             (mjd_array > guess_mjd_max - 10) & (mjd_array < guess_mjd_max + 10)
         )
         if len(inds_to_fit[0]) < 4:
-            # print('Select a wider date range')
-            return None, None
+            return
 
         numdata = len(mjd_array[inds_to_fit])
         numiter = max(int(numdata * np.log(numdata) ** 2), 200)
@@ -525,9 +615,6 @@ class SN:
                 peak_mags.append(peak_mag)
                 peak_mjds.append(fit_time[np.argmin(f(fit_time))])
 
-        if len(peak_mjds) == 0:
-            return None, None
-
         if plot:
             plt.errorbar(
                 mean(peak_mjds),
@@ -547,7 +634,7 @@ class SN:
 
     def shift_to_max(
         self,
-        filt,
+        filt: str,
         shift_array=[-3, -2, -1, 0, 1, 2, 3],
         plot=False,
         offset=0,
@@ -555,6 +642,34 @@ class SN:
         try_other_filts=True,
         return_wls=False,
     ):
+        """
+        Shift the SN photometry relative to the light curve peak.
+        This method will load the SN photometry if it is not
+        already loaded.
+        If no peak info is found, this method will attempt to fit for
+        the light curve peak.
+
+        Args:
+            filt (_type_): The filter of the photometry to fit.
+            shift_array (list, optional): An array of phases to shift the
+                selected photometry by, during the iterative peak fitting. 
+                Defaults to [-3, -2, -1, 0, 1, 2, 3].
+            plot (bool, optional): Plot the fit to the peak. Defaults to False.
+            offset (int, optional): A number of days relative to the preliminary
+                peak to fit. Useful if the identified preliminary peak is not
+                close to the true light curve peak. Defaults to 0.
+            shift_fluxes (bool, optional): Shift the photometry in
+                flux units relative to light curve peak. Defaults to False.
+            try_other_filts (bool, optional): If the light curve peak cannot be
+                found for the input `filt`, try fitting for the peak in
+                a predefined list of filters. Defaults to True.
+            return_wls (bool, optional): Return wavelength information for
+                the photometry. Defaults to False.
+
+        Returns:
+            list, list, list, list, list (optional): Lists of shifted
+                time, magnitudes, error, nondetections, and optional wavelengths.
+        """
         if not self.data:
             self.load_swift_data()
             self.load_json_data()
@@ -666,6 +781,30 @@ class SN:
         save_to_caat=False,
         force=False,
     ):
+        """
+        Iteratively fit for the SN light curve peak. 
+        This method will load the SN photometry automatically.
+        At each step of the fitting process, a plot is generated and
+        the user is prompted to supply the filter to fit, an offset,
+        whether to accept the fit, or refit with new parameters.
+
+        Args:
+            filt (str, optional): The fiter to fit. If one is not passed,
+                the user is shown the full light curve and prompted to pick
+                a filter. Defaults to "".
+            shift_array (list, optional): An array of phases to shift the
+                selected photometry by, during the iterative peak fitting. 
+                Defaults to [-3, -2, -1, 0, 1, 2, 3].
+            plot (bool, optional): Plot the fit to the peak and all 
+                intermediate plots. Defaults to True.
+            offset (int, optional): A number of days relative to the preliminary
+                peak to fit. Useful if the identified preliminary peak is not
+                close to the true light curve peak. Defaults to 0.
+            save_to_caat (bool, optional): Save the best-fit peak information to
+                the CAAT file. Defaults to False.
+            force (bool, optional): Overwrite the existing peak information in the
+                CAAT file. Defaults to False.
+        """
         self.load_json_data()
         self.load_swift_data()
         self.shifted_data = {}
@@ -727,4 +866,16 @@ class SN:
                     )
 
     def log_transform_time(self, phases, phase_start=30):
+        """
+        Natural log-transform an array of phases, given an offset
+        value to avoid numerical errors.
+
+        Args:
+            phases (np.ndarray): A numpy array of phases.
+            phase_start (int, optional): An offset to apply to the 
+                phase values, to avoid numerical errors.. Defaults to 30.
+
+        Returns:
+            np.ndarray: The log-transformed phase values.
+        """
         return np.log(phases + phase_start)
