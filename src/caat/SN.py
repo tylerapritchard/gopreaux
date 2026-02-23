@@ -36,43 +36,53 @@ class SN:
     ### All ZPs for AB mags, in 1e-11 erg/s/cm**2/A
     zps = {}
 
-    # zps = {
-    #     "UVW2": 2502.2,#744.84,
-    #     "UVM2": 2158.3,#785.58,
-    #     "UVW1": 1510.9,#940.99,
-    #     "U": 847.1,#1460.59,
-    #     "B": 569.7,#4088.50,
-    #     "V": 362.8,#3657.87,
-    #     "g": 487.6,
-    #     "r": 282.9,
-    #     "i": 184.9,
-    #     "o": 238.9,
-    #     "c": 389.3,
-    # }
-
     wle = WLE
 
-    def __init__(self, name: str = None, data: dict = None):
+    def __init__(
+        self,
+        name: str,
+        data: dict = None,
+        type: str = None,
+        subtype: str = None,
+        info: dict = {},
+    ):
         """
         Initialize a SN object. Can initialize through either a name
         or through a dictionary of data.
 
         Args:
-            name (str, optional): The name of the SN. 
+            name (str): The name of the SN. 
                 If it exists in the CAAT file, the data
-                will automatically be searched for and loaded. Defaults to None.
+                will automatically be searched for and loaded.
             data (dict, optional): A dictionary of data. Allows for loading
                 a new SN object that has not already been saved.
                 Defaults to None.
+            type (str, optional): The type (or classification) of the object.
+                If one is not provided, it will be searched for within the
+                CAAT database file and data directory automatically.
+                Defaults to None.
+            subtype (str, optional): The subtype of the object.
+                If one is not provided, it will be searched for within the
+                CAAT database file and data directory automatically.
+                Defaults to None.
+            info (dict, optional): A dictionary containing metadata of the transient.
+                This is useful if a SN object is initialized before it has been added
+                to the CAAT file. Users can pass information such as coordinates,
+                redshift, and light curve peak information directly, which can then later
+                be saved back to the CAAT file for easy re-initialization. Defaults to `{}`.
 
         Raises:
             Exception: If `name` is given, but is not found in the
                 CAAT archive.
         """
-        if isinstance(name, str):
-            self.name = name
-            self.data = {}
+        self.name = name
+        self.data = data if data else {}
 
+        if type and subtype:
+            self.classification = type
+            self.subtype = subtype
+        
+        else:
             found = False
             for typ in os.listdir(self.base_path):
                 if os.path.isdir(os.path.join(self.base_path, typ)):
@@ -98,16 +108,16 @@ class SN:
             if not found:
                 raise Exception(f"No SN named {name} found in our archives")
 
+        if info:
+            self.info = info
+        else:
             self.read_info_from_caat_file()
-            self.load_shifted_data()
 
         if isinstance(data, dict):
-            self.name = ""
-            self.classification = ""
-            self.subtype = ""
             self.data = data
-            self.info = {}
             self.shifted_data = {}
+        else:
+            self.load_shifted_data()
 
         for filt, wl in self.wle.items():
             self.zps[filt] = (10**-23 * 3e18 / wl) * 1e11
@@ -135,11 +145,28 @@ class SN:
         caat = CAAT().caat
         row = caat[caat["Name"] == self.name]
 
-        row["Tmax"] = self.info.get("peak_mjd", np.nan)
-        row["Magmax"] = self.info.get("peak_mag", np.nan)
-        row["Filtmax"] = self.info.get("peak_filt", "")
+        if not len(row):
+            # Does not already exist in the CAAT file, so add a new row
+            new_row = [
+                self.name,
+                self.classification,
+                self.subtype,
+                self.info.get("z", np.nan),
+                self.info.get("ra", np.nan),
+                self.info.get("dec", np.nan),
+                self.info.get("peak_mjd", np.nan),
+                self.info.get("peak_mag", np.nan),
+                self.info.get("peak_filt", ""),
+            ]
 
-        caat[caat["Name"] == self.name] = row
+            caat.loc[len(caat)] = new_row
+
+        else:
+            row["Tmax"] = self.info.get("peak_mjd", np.nan)
+            row["Magmax"] = self.info.get("peak_mag", np.nan)
+            row["Filtmax"] = self.info.get("peak_filt", "")
+
+            caat[caat["Name"] == self.name] = row
 
         ### Save back to the csv file
         CAAT().save_db_file(
@@ -293,22 +320,50 @@ class SN:
                         ]
                     )
 
-    def write_shifted_data(self):
+    def write_json_data(self, dry_run=True):
         """
-        Writes photometry that has been shifted relative to light curve
-        peak to a .json file. Runs after the photometry has been shifted.
+        Writes photometry that has not been shifted relative to light curve
+        peak to a .json file. Runs before the photometry has been shifted.
+
+        Args:
+            dry_run (bool, optional): Run the method by logging what new directories
+                and files would be created or saved, without actually doing so. 
+                Defaults to True.
         """
-        with open(
+        if not os.path.exists(
             os.path.join(
                 self.base_path,
                 self.classification,
                 self.subtype,
                 self.name,
-                self.name + "_shifted_data.json",
-            ),
-            "w+",
-        ) as f:
-            json.dump(self.shifted_data, f, indent=4)
+            )
+        ):
+            if not dry_run:
+                os.mkdir(
+                    os.path.join(
+                        self.base_path,
+                        self.classification,
+                        self.subtype,
+                        self.name,
+                    )
+                )
+            else:
+                logger.info("SN directory does not exist. This will make one if `dry_run=False`.")
+        
+        if not dry_run:
+            with open(
+                os.path.join(
+                    self.base_path,
+                    self.classification,
+                    self.subtype,
+                    self.name,
+                    self.name + "_data.json",
+                ),
+                "w+",
+            ) as f:
+                json.dump(self.data, f, indent=4)
+        else:
+            logger.info("This will save the data as a new file, or overwrite an existing one. To do so, specify `dry_run=False`.")
 
     def load_shifted_data(self):
         """
