@@ -17,17 +17,20 @@ Dependencies are managed using `poetry`. The recommended installation is to crea
 > pip install poetry
 > poetry install
 ```
+
 Finally, to make use of Milky Way extinction correction, the dust map files of Schlafly and Finkbeiner (2011) must be fetched and saved locally. To do so, open a Python shell and run:
 
 ```py
 import dustmaps.sfd
-
 dustmaps.sfd.fetch()
 ```
+
 That's it! `gopreaux` should now be ready to use.
 
 ## Data Structure
+
 ```mermaid
+
 flowchart TD
     A{Data};
     subgraph Types;
