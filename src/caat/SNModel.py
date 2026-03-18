@@ -649,6 +649,12 @@ class SNModel:
                 for the fit. If 1, plots the usual GP prediction with error bars
                 If >1, plots nsamples of randomly drawn GP fits. Defaults to 1.
         """
+        if self.sn is not None:
+            sn = self.sn
+        else:
+            # We just need a SN object to convert to fluxes, any will do
+            sn = self.collection.sne[0]
+
         if isinstance(photometry, dict):
             try:
                 photometry = pd.DataFrame(photometry)
@@ -684,9 +690,6 @@ class SNModel:
                             {
                                 "Filter": filt,
                                 "Phase": phase,
-                                "Wavelength": current_wls[i],
-                                "MagResidual": mags[i]
-                                - self.template[phase_ind, wl_ind],
                                 "MagErr": errs[i],
                                 "Mag": mags[i],
                             }
@@ -696,15 +699,10 @@ class SNModel:
             raise ValueError("Photometry not within bounds of this GP")
 
         ### Fit the photometry with the GP model
-        phases_to_fit = np.log(
-            residuals["Phase"].values - min(residuals["Phase"].values) + 0.1
-        )
-        x = np.vstack((phases_to_fit, np.log10(residuals["Wavelength"].values))).T
-        y = residuals["MagResidual"].values
         err = residuals["MagErr"].values
 
-        gp = GaussianProcessRegressor(kernel=self.kernel, alpha=err, optimizer=None)
-        gp.fit(x, y)
+        gp = self.surface
+        gp.alpha = err
 
         ### Predict lightcurves given the GP fit
         if not phase_min:
@@ -715,7 +713,7 @@ class SNModel:
         _, ax = plt.subplots()
         for filt in list(set(residuals["Filter"].values)):
             test_times_linear = np.arange(phase_min, phase_max, 1.0 / 24)
-            test_times = np.log(test_times_linear - phase_min + 0.1)
+            test_times = np.log(test_times_linear + self.log_transform)
             test_waves = np.ones(len(test_times)) * np.log10(WLE[filt])
 
             wl_ind = np.argmin(abs(self.wl_grid - WLE[filt]))
@@ -730,17 +728,13 @@ class SNModel:
                     np.vstack((test_times, test_waves)).T, return_std=True
                 )
             elif nsamples > 1:
+                # TODO: Create a SurfaceArray.sample_y method
                 samples = gp.sample_y(
                     np.vstack((test_times, test_waves)).T, n_samples=nsamples
                 )
 
-            test_times = np.exp(test_times) + phase_min - 0.1
+            test_times = np.exp(test_times) - self.log_transform
             residuals_for_filt = residuals[residuals["Filter"] == filt]
-
-            ### To convert to normalized magnitudes, pass in a fake SN object
-            ### with bogus peak info (the peak info doesn't matter, we just need it to convert)
-            sn = SN(data={})
-            sn.info = {"peak_filt": "V", "peak_mag": 17}
 
             if nsamples == 1:
                 residuals_for_filt["Phase"] = np.log(
