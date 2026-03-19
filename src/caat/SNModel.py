@@ -768,7 +768,6 @@ class SNModel:
                     np.vstack((test_times, test_waves)).T, return_std=True
                 )
             elif nsamples > 1:
-                # TODO: Create a SurfaceArray.sample_y method
                 samples = gp.sample_y(
                     np.vstack((test_times, test_waves)).T, n_samples=nsamples
                 )
