@@ -233,6 +233,7 @@ class SNModel:
             phases_to_fit = filtered_df["Phase"].values
             wls_to_fit = filtered_df["ShiftedWavelength"].values
             shifted_mags = filtered_df["ShiftedFlux"].values
+            errs_to_fit = filtered_df["ShiftedFluxerr"].values
             residuals = []
 
             for phase, wl, mag in zip(phases_to_fit, wls_to_fit, shifted_mags):
@@ -243,8 +244,7 @@ class SNModel:
 
         x = np.vstack((np.log(phases_to_fit + self.log_transform), np.log10(wls_to_fit))).T
         y = residuals
-        # TODO: Use actual errors here:
-        self.surface.alpha = np.asarray(np.ones((len(residuals),))*0.1)
+        self.surface.alpha = errs_to_fit
         self.surface.fit(x, y)
 
     def save_fits(self, filename: str = None, force: bool = False):
@@ -690,8 +690,14 @@ class SNModel:
             & (cube["Nondetection"] == False)
             & (cube["Phase"] > phase_min)
             & (cube["Phase"] < phase_max),
-            ["ShiftedFilter", "ShiftedFlux", "ShiftedFluxerr", "ShiftedWavelength", "Phase"]
+            ["Mag", "ShiftedFilter", "ShiftedFlux", "ShiftedFluxerr", "ShiftedWavelength", "Phase"]
         ]
+
+        try:
+            filtered_cube["MagFromPeak"] = sn_to_fit.info["peak_mag"] - filtered_cube["Mag"]
+        except:
+            raise ValueError("The input SN object must have peak info")
+        
         sn_to_fit.cube = filtered_cube
         
         # Get residuals of SN photometry and template
@@ -710,6 +716,9 @@ class SNModel:
                 phases = sn_to_fit.cube.loc[sn_to_fit.cube["ShiftedFilter"] == filt][
                     "Phase"
                 ].values
+                mags_from_peak = sn_to_fit.cube.loc[sn_to_fit.cube["ShiftedFilter"] == filt][
+                    "MagFromPeak"
+                ].values
 
                 if len(phases) > 0:
                     for i, phase in enumerate(phases):
@@ -726,7 +735,7 @@ class SNModel:
                                     "Wavelength": current_wls[i],
                                     "MagResidual": mags[i] - self.template[phase_ind, wl_ind],
                                     "MagErr": errs[i],
-                                    "Mag": mags[i],
+                                    "Mag": mags_from_peak[i],
                                 }
                             )
         residuals = pd.DataFrame(residuals)
